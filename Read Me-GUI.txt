@@ -1,0 +1,90 @@
+
+*****************************NOTE: Read this after reading the Report*************************************
+(Everything mentioned in the document is in reference to the code)
+
+Open and microsoft visual studio and create a new project by selecting windows form application.
+Window opens with design form (form1.cs[design]). Double on that small window to open a new tab with few lines of code.
+Now drag and drop required tools from the toolbox. (Click on View in the menu bar and select toolbox from the dropdown)
+double click on the tools to code on-click events.
+
+*****************************For SEE Testing*******************************
+What does the user do?
+	select the comport and baud rate for the serial communication and click OPEN PORT
+	select the comport, baudrate, current and voltages and click on POWER ON
+	select the required patterns in the list box.
+	Click SEE TESTING
+
+Required:
+	1 Serial Port initialisation
+	2 Power supply com port initialisation
+	3 Text file creation and editing
+	4 read and write operations
+
+Comport initialisation: 
+	this requires minimum of 5 attributes to be set, namely, COM PORT, Baud Rate, Data Bits, Stop Bits,Parity. The comport and baudrate are set by the user by selecting from one of the options from the dropdown menu. The dropdown menu type of tool box can be created by selecting combobox in the toolbox and add items.(Find items options in the properties of the combobox).
+
+Text file creation: There are two stages in doing this: 
+	1 Creating a txt file
+	2 editing the txt file
+
+1 can be achieved using the System.IO library. The Filestream calss is used to achieve this. With reference to the code(DataLogFun()), firstly it checks for the existence of the txt file in the location given, if not it proceeds by creating a new one. If there already exists a file with the same name, it creates a message box with two buttons (Yes-append, No-Overwrite), the dialogresult data type reads which button is selected in the messagebox and appropriate changes are made to the txt file.
+Now that the txt file is created and ready, (2) operation can be performed using the streamwriter class which allows writing characters onto the txtfile.
+
+Read n Write Operation:
+the write operation is in reference to the EDAC,i.e., writing data to the on chip memory available on the edac and similarly the read cycle is defined.
+
+What Happens on the behind?
+>>The serial ports are initialised as explained above.
+
+>>When the patterns are selected in the list box, an array is used to store its result(as in if selected the element in that list becomes 1). getslected function checks whether the that item is selected and if yes, makes the list element in the array 1. If the listitem is slected and then deselected, the else if statement makes it zero.(i.e., list[i] == 1 && !listBox1.GetSelected(i))
+
+>>Once SEE Testing button is clicked, '%' character is written onto the PIC (port.write('%')) telling that SEE testing is going to be perofrmed.
+
+>>A txt file is created with its index name. 
+
+>>The index of the slected items in the listbox is written to the PIC sequentially indicating that the specific pattern is to be writeen in the entire memory location.
+
+>>It then goes into the Read_Write_Data() function.
+
+***********Read_Write_Data()*************
+Data is recieved from the PIC during the write cycle( Address Lsb Address MSb Data Parity == bytes of data), this accounts to 8192*4=32768 bytes of data(8192 = memory locations) is received during a write cycle Every 4 byutes of Data corresponds to the information of one particular location. This data is stored in a storeRead 2D array along with the parity that is calulated at the front end. the storeRead array stores:
+storeRead[x,0]== Address
+storeRead[x,1]==Data
+storeRead[x,2]==Parity
+storeRead[x,3]== Parity calculated at the Front end.
+The Parity at the front is calculated using the XOR logic of the data bits. The BitArray data types is used to breakdown the byte of data into inidividual bits(in boolean form). The required XOR operations are performed and stored in the  5 bit parity BitArray. Since, the parity bits are in the boolean form, they are converted into the Decimal form using the 2 power method. For eg, 8 in binary is 1000 and in the BitaArray , it is stored as True False False False, this is converted into decimal as 1x2^3+0x2^2+0x2^1+0x2^0 = 8
+
+>>Similar happens in the Read cycle. We recieve (Address lsb msb Hammout (DERD+SERC+NER+Syndrome)) 4 bytes of data. This data is stored in a storeWrite 2D array along with the syndrome that is calulated at the front end. the storeWrite array stores:
+storeWrite[x,0]== Address
+storeWrite[x,1]==Data
+storeWrite[x,2]==Syndrome
+storeWrite[x,3]== Syndrome calculated at the Front end.
+
+>>The Error boxes are changed according the following logic:
+the last byte received in the 4 bytes is in the form of DERD+SERC+NER+Syndrome with DERD being the MSB. When bitwise anding this with 32(0010000) results in obtainf the NER value, if this equals 32, then it means that NER is 1 and that no error is detected and similar follows for the other two error signals. The result is stored ina 2D storeResult array:
+storeResult[x,0]: NER: Yes/No
+storeResult[x,1]: SERC: Yes/No
+storeResult[x,2]: DERD: Yes/No
+
+>> Current and voltage measurements are made at regular intervals.
+
+>>the progress bar is increased 1% every time the count is a multiple of 327 (this is 1 % of the count of 32768).
+
+********************TRANSMIT*********************
+after filling in the required values in the text boxes, click TRANSMIT
+
+what happens on the back end?
+>>the address in broken droken down in to lsb and msb as it is  13bit address and only 8 bits can be transferred at once. so, boh the start and end address are broken down into lsb and msb forming 4byte of dat.
+>>data is sent upon a agrred format during trasmit click option : $ start address lsb msb end address lsb msb data # == 7 byte of data
+>>in return 4  byte of data is recieved as it is recieved in the see testing write cycle and similar is done.(address lsb msb data parity) 
+
+******************READ************************
+have to fill the start and end address in the read addresses group box from which addresses the data is to be read,  click READ
+
+what happens on the back end?
+>>the address in broken droken down in to lsb and msb as it is  13bit address and only 8 bits can be transferred at once. so, boh the start and end address are broken down into lsb and msb forming 4byte of dat.
+>>data is sent upon a agrred format during trasmit click option : @ start address lsb msb end address lsb msb  # == 6 byte of data
+>>in return 4  byte of data is recieved as it is recieved in the see testing read cycle and similar is done.(address lsb msb hammout (DERD+SERC+NER+syndrome))
+
+ 
+

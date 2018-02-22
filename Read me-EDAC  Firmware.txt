@@ -1,0 +1,59 @@
+In order to make a project in MPLAB X IDE - chooose "Microchip Embedded"->"Standalone Project"(as project type)->"PIC18F6527"(as device)->choose the connected hardware tool->"MPLAB REAL ICE" (as in-circuit emulator)->C Compiler->Project Name, Location and other project options->Finish
+
+Burning Code into PIC - click F6 or "run main project".
+Debugging code - put breakpoint and "Debug Main Project".
+
+********************Code************************************
+-Include PICF6527 library and set the "configuration registers" using, Windowas tab->PIC Memory Views->Configuration Bits. Code is generated automatically. Copy and paste in the main window.
+-Receive interrupt is set as hight priority i.e. when anything is received through serial port PIC is interrupted. It branches off from its current work and excutes the ISR of high priority interrupt i.e. receive interrupt.
+-The ISR changes values of flag variable - "flag" and "flag1"  and the stores the information in an array in case of direct read and direct write.
+-It checks for abort button being pressed in case of SEE Testing.
+-It checks for "#" which indicates end of a partcular cycle.  
+-Other things to be done is clearing latches and setting port as input or output. 
+-Initializing interrupt and USART registers.
+-Internal Clock frequency is 32MHz set using OSCCON and OSTUNE registers.
+-Current baud rate is 115200 bps and calculations for SPBER and SPBERG registers is done using the formula, Baud Rate = 32MHz/16*(n+1) n=SPBRGH2_SPBRG2.
+
+NOTE: for register decriptions and executing the interrupt check pic data-sheet, code and EDAC report.
+
+********************Writing into Memory only*****************
+1. User presses "Transmit". Data received is $Start Address End Address Data#.
+2. "$" makes Flag =1 telling that further data interrupting is part of write cycle.
+3. Data is stored in array and sent to write function. The write function is called when "#" is received and "flag" is cleared to "0".
+4. For each address, from start to end "Current address Data Parity" are sent.
+
+********************Reading from Memory only*****************
+1. User presses "Read". Data received is @Start Address End Address#.
+2. "@" makes Flag =2 telling that further data interrupting is part of read cycle.
+3. Data is stored in array and sent to read function. The read function is called when "#" is received and "flag" is cleared to "0".
+4. For each address, from start to end "Current address Hammout Symdrome Ner Serc Derd" are sent.
+
+********************SEE Testing******************************
+1. When the user press "SEE Testing" button in the GUI "%" character is received in the firmware. "Flag" is set to 3 for telling the next interrupt coming from SEE Testing that the interrupt is for SEE Testing.
+2. First index no. related to the patterns selected is then sent."Flag1" is the the set with that index number. 
+3. The infinite while loop in the main function keeps on checking "Flag1" using switch-case statements and corresponding lines of codes related to that pattern are executed.
+4. In the firmware itself start address, 0 and end address 8191 are sent in the read and write cycle.
+	a. If index received is "0", data 0x00 is sent along with other data(variable p=0).Pattern 0x00 is written into all addresses.
+	b. If index received is "1", data 0xFF is sent along with other data(variable p=0).Pattern 0xFF is written into all addresses.
+	c. If index received is "2", data 0x55 is sent along with other data(variable p=0).Pattern 0x55 is written into all addresses.
+	d. If index received is "3", data 0xAA is sent along with other data(variable p=0).Pattern 0xAA is written into all addresses.
+	e. If index received is "4", variable p=4.Pattern 0x55 is written into even and 0xAA into odd addresses.
+	f. If index received is "5", variable p=5.Pattern 0xAA is written into even and 0x55 into odd addresses.
+	g. If index received is "6", variable p=6.Pattern equal to current address LSB is written into current address.
+
+*****************Write function*******************************
+1. Input to function is an array containg start address LSB MSB, End address LSB MSB, data. A global variable p is also checked. Default status of which is 0.
+2. Address received is in decimal form LSB and MSB. Eg. 8191(in decimal) sent as 0x51(MSB) and 0x5B(LSB). In the function address is then calculated as = (0x51*0x64)+0x5B.
+3. Similarly when the current address is sent, it is converted into decimal LSB MSB and then sent seperately. eg 0x1FFF % (0x0A * 0x0A) gives decimal LSB. 
+4. Variable p is checked. If it is default i.e. 0 pattern sent is written. If it is not default then if-else statement related to that part is executed.
+5. Data sent back is - current address LSB MSB, data and partiy.
+
+******************Read function********************************
+1. Input to function is an array containg start address LSB MSB, End address LSB MSB.
+2. All types of address calculations is same as in write function.
+3. Data sent back is - current address LSB MSB, hammout and syndrome+ner+serc+derd bits. 
+
+******************Control signals******************************
+1. Default status of reset, Write Enable and Output Enable is high and that of Chip Enable is low.
+2. During write cycle - give address and data and then make Write Enable low for 1ms. Data gets written. Now parity could be read.
+3. During read cycle - give address and make output enable low. Now read the hammout, syndrome, Ner, Serc and Derd bits.  

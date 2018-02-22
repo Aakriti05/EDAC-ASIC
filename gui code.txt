@@ -1,0 +1,1016 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.Linq;
+using System.Text;
+using System.Windows.Forms;
+using System.IO.Ports;
+using System.IO;
+using System.Collections;
+using System.Threading;
+using System.Diagnostics;
+
+
+/*To DO-
+ * 1 
+ * 2 
+ * 3 how to make radiobuttons read only
+ * 4 baud rate time match with dat 23s which is not
+ * 5 if possible, log file directly to excel
+ * 6 stacked graph possible .. how?
+ */
+
+/***************************************
+ ***************DO NOT******************
+ **********MAKE CHANGES TO**************
+ **************THE CODE*****************
+ *********UNLESS AUTHORIZED************* 
+ *************************************** 
+ ***************************************/
+
+namespace WindowsFormsApplication1
+{
+    public partial class Form1 : Form
+    {
+        SerialPort port = new SerialPort();                                 //Define Serial Port for SERIAL COMMUNICATION using the system.io.ports library
+        SerialPort port1 = new SerialPort();
+        byte[] toSend = new byte[7];                                        //toSend byte array variable is used to transmit the first set of data. Format : @start address lsb msb end address lsb msb data #
+        byte[] toSend2 = new byte[6];                                       //toSend2 byte variable array is used to send the second data of data. Format : @read start address lsb msb read end address lsb msb #     
+        string LogfileName = string.Empty;
+        StreamWriter DataLog;                                               //The StreamWriter class inherits from the abstract class TextWriter that represents a writer, which can write a series of character.
+        StreamWriter VILog;
+        FileStream LogfileStream = null;                                    //The FileStream class in the System.IO namespace helps in reading from, writing to and closing files.
+        string [,] storeRead = new string[8192,4];
+        string [,] storeWrite = new string[8192, 4];
+        string [,] storeResult = new string[8192, 3];
+        string[,] VI_Values = new string[900, 6];
+        int vicount = 0;
+        int[] list = new int[7];
+        int abort_flag = 0;
+        int check_flag = 0;
+        int loop_flag = 0;
+        int ErrorCount = 0;
+        int transmit_clicked = 0;
+        int random_flag = 0;
+        Stopwatch time = new Stopwatch();
+              
+        
+       
+        public Form1()
+        {
+            InitializeComponent();
+            Com_Port.Items.AddRange(SerialPort.GetPortNames());             //getportnames is a inbuilt function to get the details of available ports
+            comboBox2.Items.AddRange(SerialPort.GetPortNames());
+            radioButton1.Checked = true;
+            this.WindowState = FormWindowState.Maximized;
+            this.FormBorderStyle = FormBorderStyle.FixedSingle;
+            //Initialising the textboxes values
+            //Initialising the port for serial communication
+            BaudRate.Text = "115200";
+            Com_Port.Text = "COM1";
+            //initialising the voltage current values
+            comboBox2.Text = "COM8";
+            comboBox1.Text = "9600";
+            V1_Edac.Text = Convert.ToString(3.3);
+            I1_Edac.Text = Convert.ToString(0.01);
+            V2_Edac.Text = Convert.ToString(1.8);
+            I2_Edac.Text = Convert.ToString(0.01);
+            V_PIC.Text = Convert.ToString(3.3);
+            I_PIC.Text = Convert.ToString(0.1);
+        }
+
+        private void groupBox1_Enter(object sender, EventArgs e)
+        {
+
+        }
+ 
+        private void Open_Port_Click(object sender, EventArgs e)            //Initializing the serial port 
+        {
+            OpenPort();
+        }
+
+        private void OpenPort()
+        {
+            try
+            {
+                port.BaudRate = Convert.ToInt32(BaudRate.Text);                 //set the baudrate given by the value from the dropdown
+                port.PortName = Com_Port.Text;                                  //Comport name selected from the dropdown of the available ports list
+                port.Parity = Parity.None;                                      //Parity is set to none
+                port.StopBits = StopBits.One;
+                port.DataBits = (int)8;                                         //8 bits and 1 Stopbit is used for serial communication
+                port.ReadBufferSize = 66000;
+                
+            }
+            catch (Exception error)
+            {
+                MessageBox.Show(error.Message);
+            }
+            
+        }
+
+        private void Power_On_Click(object sender, EventArgs e)
+        {
+            PowerOn();
+        }
+
+        private void PowerOn()
+        {
+            try
+            {
+                port1.PortName = Convert.ToString(comboBox2.SelectedItem);      //Intializing the port fto control power supply
+                if (!port1.IsOpen)
+                    port1.Open();
+
+                port1.BaudRate = Convert.ToInt32(comboBox1.SelectedItem);       //set the baudrate given by the value from the dropdown,i.e, 9600 for the HAMEG Power Supply
+                port1.DataBits = 8;                                             //8 bits and 1 Stopbit is used for serial communication
+                port1.Parity = Parity.None;                                     //Parity is set to none
+                port1.StopBits = StopBits.One;
+                port1.Handshake = Handshake.None;                               //Handshaking set to none
+
+                string inst_name;
+                port1.WriteLine("*IDN?");                                       //IDeNtification, Returns the instrument identification string.
+                Thread.Sleep(100);
+                inst_name = port1.ReadExisting();
+
+                if (inst_name != "HAMEG,HMP2030,019394012,HW50010002/SW2.30\n") //the params HAMEG,‹device type›,‹serial number›,‹firmwareversion›
+                {
+                    MessageBox.Show("select another COM PORT");
+                }
+
+                port1.WriteLine("*RST");                                        //Sets the instrument to a defined default status,i.e, 1V 1A
+                Thread.Sleep(100);
+
+                port1.WriteLine("INST OUT1");                                   //Queries the channel selection.
+                port1.WriteLine("OUTP:SEL ON");                                 //Turning on previous selcted channels simultaneously
+                port1.WriteLine("VOLT " + V1_Edac.Text);                        //Sets the Voltage Value
+                port1.WriteLine("CURR " + I1_Edac.Text);                        //Sets the current value
+                Thread.Sleep(100);
+
+                port1.WriteLine("INST OUT2");
+                port1.WriteLine("OUTP:SEL ON");
+                port1.WriteLine("VOLT " + V2_Edac.Text);
+                port1.WriteLine("CURR " + I2_Edac.Text);
+                Thread.Sleep(100);
+
+                port1.WriteLine("INST OUT3");
+                port1.WriteLine("OUTP:SEL ON");
+                port1.WriteLine("VOLT " + V_PIC.Text);
+                port1.WriteLine("CURR " + I_PIC.Text);
+                Thread.Sleep(100);
+
+                port1.WriteLine("OUTP ON");                                         //Activates the ouput of previously selected channels
+            }
+            catch (Exception error)
+            {
+                MessageBox.Show(error.Message + "\n" + "Select the required parameter/s");
+            }
+        }
+
+        private void listBox1_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            for (int i = 0; i < 7; i++)                                     //(for loop) for checking which of the patterns is selected
+            {                                                               //Making list items 1 or 0 to use them in the SEE Testing to know which pattern is been selected.
+                if (listBox1.GetSelected(i))                                //(.GetSelected(i))returms a value indicating whether the list[i] item is selected
+                    list[i] = 1;                                            //If true, make it one
+                else if (list[i] == 1 && !listBox1.GetSelected(i))          //If previously selected and now deselected by clicking on it twice, this is executed
+                    list[i] = 0;                                            //Make that list item 0 which was deselected
+            }
+        }
+
+        private void SEE_Testing_Click(object sender, EventArgs e)
+        {
+            if (!port.IsOpen)                                               //open the port if closed
+                 port.Open();
+            time.Start();
+            port.Write("%");                                                //% sent to PIC indicating SEE testing
+            int k = 0;
+            while(abort_flag!=1){
+                if (k == 7)
+                    k = 0;
+                for (k = 0; k < 7; k++)                                     //(for loop) to check which list item is selected by checking if it is 1.
+                {
+                    if (list[k] == 1 && (loop_flag == 0 || check_flag == 1) && abort_flag != 1)
+                    {
+                        vicount = 0;
+                        progressBar1.Value = 0;                                 //If found,i.e, if the pattern is selected, reset the progress bars
+                        progressBar2.Value = 0;
+                        radioButton1.Checked = true;                            //The decimal radio button is selected
+                        radioButton1.AutoCheck = false;                         //This is done so that the user can not change the input format while SEE testing is going on
+                        radioButton2.AutoCheck = false;
+                        foreach (var series in chart1.Series)
+                            series.Points.Clear();
+
+                        Log_Sheet.AppendText("\n\n" + DateTime.Now + "\n");
+                        Log_Sheet.AppendText(listBox1.Items[k].ToString() + " is being Written" + "\n");
+                        Log_Sheet.ScrollToCaret();
+
+                        Data_Log_Box.Text = "f:/" + listBox1.Items[k].ToString() + ".txt";                   //The name of the txt file is the index of the list item.
+                        Data_LogFun();                                          //Calling a function to create or append the txt file
+                        DataLog = new StreamWriter(LogfileStream);                      //DataLog is a streamwriter with its location given by the LogFileName
+                        Data_Log_Box.Text = "f:/" + listBox1.Items[k].ToString() + "_VI" + ".txt";
+                        Data_LogFun();
+                        VILog = new StreamWriter(LogfileStream);
+
+                        port.Write(Convert.ToString(k));                        //Writing the index onto the PIC indicating that pattern has to be written onto the EDAC
+                        Read_Write_Data();                                      //Calling a function to read the byte at the serial port buffer(data sent by the EDAC through PIC)
+                        DataLog.WriteLine(DateTime.Now.ToString("dd-M-yyyy  HH:mm:ss"));
+                        loop_flag = 1;
+                        timebomb.Text = time.ElapsedMilliseconds.ToString();
+                        if (time.ElapsedMilliseconds > 15000)
+                            break;
+                        
+                    }
+                }
+                
+        
+            }
+            if (abort_flag == 0)
+                port.Write("#");                                                //# is sent to the PIC indicating that the SEE Testing is done.
+            else
+            {
+                abort_flag = 0;
+                loop_flag = 0;
+                DataLog.WriteLine("System was Aborted");
+                VILog.WriteLine("System was Aborted");
+                Log_Sheet.AppendText("System was Aborted");
+                DataLog.Close();
+                VILog.Close();
+                OpenPort();
+                if(!port.IsOpen)
+                    port.Open();
+                if (!port1.IsOpen)
+                    port1.Open();
+                listBox1.ClearSelected();
+                MessageBox.Show("Abort Successful");
+                
+            }
+         }
+
+        private void Data_Log_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                Data_LogFun();                                                  //Calling a function to create a function
+            }
+            catch (DirectoryNotFoundException error)
+            {
+                MessageBox.Show(error.Message+"\t"+"Give valid location");
+                Data_Log_Box.Text = "";
+            }
+        }
+
+        private void Data_LogFun()
+        {
+            LogfileName = Data_Log_Box.Text;                                //LogFileName is a FileStream class defined globally
+            if (File.Exists(LogfileName))                                   //Check if the file already exists
+            {
+                DialogResult Dialogresult2;
+                string Messageboxdata2 = "Data Log File \" " + LogfileName + "\",  Already Exists!" + "\n" + " Yes-Append, No-Over Write ?";
+                Dialogresult2 = MessageBox.Show(Messageboxdata2, "File_Already Present", MessageBoxButtons.YesNo);
+                if (Dialogresult2 == System.Windows.Forms.DialogResult.Yes)
+                {   //  Append the file
+                    LogfileStream = new FileStream(LogfileName, FileMode.Append, FileAccess.Write);
+                }
+                else
+                { //  Over write and Proceed.
+                    LogfileStream = new FileStream(LogfileName, FileMode.Create, FileAccess.Write);
+                }
+            }
+            
+            else
+            { //  create a new file
+                LogfileStream = new FileStream(LogfileName, FileMode.CreateNew, FileAccess.Write);
+            }
+            
+            //DataLog.AutoFlush = true;
+
+        }
+  
+        private void Read_Write_Data()
+        {
+            try
+            {
+                int Count = 0;                                                  //This variable is used as a count to read the data from the port
+                int flag = 0;                                                   //This is used in the no errors loop to check if there are no errors in the 8192 locations
+                Byte[] DataS = new Byte[70000];
+                //Clears all the storing arrays
+                Array.Clear(storeRead, 0, storeRead.Length);
+                Array.Clear(storeResult, 0, storeResult.Length);
+                Array.Clear(storeWrite, 0, storeWrite.Length);
+
+                DataLog.WriteLine(DateTime.Now.ToString("dd-M-yyyy  HH:mm:ss"));//The current time is written onto the txt file
+                VILog.WriteLine("S.No." + "\t" + "DATETIME" + "\t\t\t" + "V1_EDAC" + "\t" + "I1_EDAC" + "\t\t" + "V2_EDAC" + "\t" + "I2_EDAC" + "\t\t" + "V_PIC" + "\t" + "I_PIC");
+                
+                //Log_Sheet.Text += "\n" + "Address" + "\t" + "Data" + "\t\t" + "Parity" + "\t" + "Calculated Parity" + "\n";
+                while (Count < 65537)
+                {
+                    port.Read(DataS, Count, 1);                                 //Data is read byte by byte using the offset as count and stored in the DataS array
+
+                    if (Count < 32768)                                          //Since the first cycle recieves 4 bytes of data from each address location,i.e, 32768 bytes of data
+                    {
+                        if (Count == 1)
+                        {
+                            Log_Sheet.AppendText(DateTime.Now + ">>" + "Writing to the Edac started" + "\n");
+                            Log_Sheet.ScrollToCaret();
+                            Start_Address.Text = Convert.ToString(0);
+                            End_Address.Text = Convert.ToString(8191);
+                        }
+
+                        
+                        if (Count % 4 == 3)                                     //Everytime this is true we get a 4 byte data corresponding a particular location
+                        {
+                            int offset_count = Count - 3;                       //The format of Data: Address LSB Address MSB Data Parity
+                            int address_variable = (DataS[offset_count + 1] * 100) + DataS[offset_count]; //the address location is calculated and stored in a 2D array
+
+                            BitArray x = new BitArray(8);                       //BitArray:It represents an array of the binary representation using the values 1 and 0
+                            BitArray p = new BitArray(5);
+
+                            byte[] data = { DataS[offset_count + 2] };          //Parity bits calculation using bitwise xor
+                            x = new BitArray(data);                             //BitArray x store the binary representation of the Data value(8 bit)
+                            p[0] = x[0] ^ x[1] ^ x[3] ^ x[4] ^ x[6];            //Parity bits calculated according to the XOR logic of the Hamming Code
+                            p[1] = x[0] ^ x[2] ^ x[3] ^ x[5] ^ x[6];
+                            p[2] = x[1] ^ x[2] ^ x[3] ^ x[7];
+                            p[3] = x[4] ^ x[5] ^ x[6] ^ x[7];
+                            p[4] = x[0] ^ x[1] ^ x[2] ^ x[3] ^ x[4] ^ x[5] ^ x[6] ^ x[7] ^ p[0] ^ p[1] ^ p[2] ^ p[3];
+
+                            int sum_parity = 0;
+                            for (int l = 0; l < p.Count; l++)                    //calculating the int value of the expected parity                                                                                                                        
+                            {
+                                if (p[l])
+                                    sum_parity += Convert.ToInt16(Math.Pow(2, l)); //the value is calculated using the 2^i method, for example, 5 is 00101, i.e (0x2^4)+(0x2^3)+(1x2^2)+(0x2^1)+(1x2^0)=5
+                            }
+
+                            storeRead[address_variable, 0] = Convert.ToString((DataS[offset_count + 1] * 100) + DataS[offset_count]);    //the fiest two bytes have the address so it stored in a 2D array
+                            storeRead[address_variable, 1] = Convert.ToString(DataS[offset_count + 2], 2);                               //the 3rd byte recieved is the data to be written onto the address location
+                            storeRead[address_variable, 2] = Convert.ToString(DataS[offset_count + 3], 2);                               //the 4th byte recieved is the parity generated by the EDAC
+                            storeRead[address_variable, 3] = Convert.ToString(sum_parity, 2).PadLeft(5, '0');                            //PadLeft adds zeroes to the left to make it a 5 bit value if its not 
+
+                            //Log_Sheet.AppendText(storeRead[address_variable, 0] + "\t" + storeRead[address_variable, 1].PadLeft(8, '0') + "\t" + storeRead[address_variable, 2].PadLeft(5, '0') + "\t" + storeRead[address_variable, 3] + "\n");//Log_Sheet.Text += storeRead[b, 0] +"\t"+ storeRead[b, 1].PadLeft(8,'0') +"\t"+storeRead[b, 2].PadLeft(5,'0') +"\t"+ storeRead[b, 3]+"\n";
+                            //Log_Sheet.ScrollToCaret();
+
+                            /*//Text boxes Append
+                            Current_Address.Text = Convert.ToString(address_variable);
+                            Parity_Box.Text = storeRead[address_variable, 2].ToString().PadLeft(5,'0');
+                            Parity_Actual_Box.Text = storeRead[address_variable, 3].ToString();
+                            tb2.Text = DataS[offset_count + 2].ToString();*/
+                        }
+
+                        if (Count % 327 == 0 && Count != 0)                   //                   
+                        {
+                            //Measure_Values();
+                            progressBar1.Increment(1);
+                        }
+
+                        if (Count == 32767)
+                        {
+                            Log_Sheet.AppendText(DateTime.Now + ">>" + "Writing to the Edac finished" + "\n");
+                            Log_Sheet.ScrollToCaret();
+                        }
+
+                    }
+
+                    else if (Count >= 32768)                                    //***Similar to the first cycle, this cycle recieved data after the EDAC has proceesed it
+                    {
+                        if (Count == 32768)
+                        {
+                            Log_Sheet.AppendText(DateTime.Now + ">>" + "Reading from the Edac started" + "\n");
+                            Log_Sheet.ScrollToCaret();
+                            Start_Address_Read.Text = Convert.ToString(0);
+                            End_Address_Read.Text = Convert.ToString(8191);
+                            DataLog.WriteLine("\n" + "Address" + "\t\t" + "Data" + "\t\t" + "Parity" + "\t\t" + "Calculated Parity" + "\t\t" + "Address" + "\t\t" + "Hammout" + "\t\t" + "Syndrome" + "\t\t\t" + "Calculated Syndrome" + "\t\t" + "No Error" + "\t\t" + "Single Error Corrected" + "\t" + "Double Error Detected");
+                        }
+
+                        if (Count % 327 == 0 || Count == 65535)
+                        {
+                            progressBar2.Increment(1);
+                        }
+
+                        if (Count % 4 == 3)                                     //Format:Address LSB Address MSB Hammout (DERD+SERC+NER+Syndrome)
+                        {
+                            int offset_count = Count - 3;
+                            int address_variable = (DataS[offset_count + 1] * 100) + DataS[offset_count];
+                            int syndrome = DataS[offset_count + 3] & 31;        //the bitwise anding operation brings out the syndrome bits as they are the last 5bits of the last 8bit(byte) of data
+
+                            BitArray x = new BitArray(8);
+                            BitArray p = new BitArray(5);
+
+                            byte[] hammout = { DataS[offset_count + 2] };
+                            x = new BitArray(hammout);
+
+                            p[0] = x[0] ^ x[1] ^ x[3] ^ x[4] ^ x[6];            //Parity bits calculated according to the XOR logic of the Hamming Code
+                            p[1] = x[0] ^ x[2] ^ x[3] ^ x[5] ^ x[6];
+                            p[2] = x[1] ^ x[2] ^ x[3] ^ x[7];
+                            p[3] = x[4] ^ x[5] ^ x[6] ^ x[7];
+                            p[4] = x[0] ^ x[1] ^ x[2] ^ x[3] ^ x[4] ^ x[5] ^ x[6] ^ x[7] ^ p[0] ^ p[1] ^ p[2] ^ p[3];
+
+                            BitArray s = new BitArray(5);                       //Syndrome bits calculation using bitwise xor                                                                                                           
+                            s[0] = p[0] ^ x[0] ^ x[1] ^ x[3] ^ x[4] ^ x[6];
+                            s[1] = p[1] ^ x[0] ^ x[2] ^ x[3] ^ x[5] ^ x[6];
+                            s[2] = p[2] ^ x[1] ^ x[2] ^ x[3] ^ x[7];
+                            s[3] = p[3] ^ x[4] ^ x[5] ^ x[6] ^ x[7];
+                            s[4] = x[0] ^ x[1] ^ x[2] ^ x[3] ^ x[4] ^ x[5] ^ x[6] ^ x[7] ^ p[0] ^ p[1] ^ p[2] ^ p[3] ^ p[4];
+
+                            int sum_syndrome = 0;
+                            for (int i = 0; i < s.Count; i++)
+                            {
+                                if (s[i])
+                                    sum_syndrome += Convert.ToInt16(Math.Pow(2, i));
+                            }
+
+
+                            storeWrite[address_variable, 0] = Convert.ToString((DataS[offset_count + 1] * 100) + DataS[offset_count]);  //Address
+                            storeWrite[address_variable, 1] = Convert.ToString(DataS[offset_count + 2], 2);                             //Hammout
+                            storeWrite[address_variable, 2] = Convert.ToString(syndrome, 2);                                            //Syndrome
+                            storeWrite[address_variable, 3] = Convert.ToString(sum_syndrome, 2).PadLeft(5, '0');                        //Calculated Syndrome
+
+
+                          
+
+                            //Result operation
+
+                            if ((DataS[offset_count + 3] & 32) == 32)      // NER extracted using bitwise'and'operation which is 5th bit in the 4th byte recieved
+                            {
+                                storeResult[address_variable, 0] = "Yes";
+                                NER_Box.BackColor = Color.Green;
+                                flag++;                                     //with every no error, flag is increased
+                            }
+                            else
+                            {
+                                storeResult[address_variable, 0] = "No";
+                                NER_Box.BackColor = Color.Red;              //Textboxes backcolor is appropriately changed
+                                ErrorCount++;
+                            }
+
+                            if ((DataS[offset_count + 3] & 64) == 64)       // SERC extracted using bitwise'and'operation which is 6th bit in the 4th byte recieved
+                            {
+                                storeResult[address_variable, 1] = "Yes";
+                                SERC_Box.BackColor = Color.Blue;
+                                Log_Sheet.AppendText(DateTime.Now + ">>" + "A Single Error was detected at " + storeWrite[address_variable, 0] + " and was corrected" + "\n");
+                                Log_Sheet.ScrollToCaret();
+                            }
+                            else
+                            {
+                                storeResult[address_variable, 1] = "No";
+                                SERC_Box.BackColor = Color.Yellow;
+                            }
+
+                            if ((DataS[offset_count + 3] & 128) == 128)     // DERD extracted using bitwise'and'operation which is 7th bit in the 4th byte recieved
+                            {
+                                storeResult[address_variable, 2] = "Yes";
+                                DERD_Box.BackColor = Color.Blue;
+                                Log_Sheet.AppendText(DateTime.Now + ">>" + "A Double Error was detected at " + storeWrite[address_variable, 0] + " and was not corrected" + "\n");
+                                Log_Sheet.ScrollToCaret();
+                            }
+                            else
+                            {
+                                storeResult[address_variable, 2] = "No";
+                                DERD_Box.BackColor = Color.Yellow;
+                            }
+
+                            //Writing onto the DataLog,i.e, txt file
+                            try
+                            {
+                                
+                                DataLog.WriteLine(storeRead[address_variable, 0] + "\t\t" + storeRead[address_variable, 1].PadLeft(8, '0') + "\t" + storeRead[address_variable, 2].PadLeft(5, '0') + "\t\t" + storeRead[address_variable, 3] + "\t\t\t" + storeWrite[address_variable, 0] + "\t\t" + storeWrite[address_variable, 1].PadLeft(8, '0') + "\t" + storeWrite[address_variable, 2].PadLeft(5, '0') + "\t\t\t" + storeWrite[address_variable, 3] + "\t\t\t" + storeResult[address_variable, 0] + "\t\t" + storeResult[address_variable, 1] + "\t\t\t" + storeResult[address_variable, 2]);
+
+                            }
+                            finally
+                            {
+                                if (address_variable == 8191)
+                                {
+
+                                    Log_Sheet.AppendText(DateTime.Now + ">>" + "Reading from the Edac finished" + "\n");
+                                    Log_Sheet.ScrollToCaret();
+
+                                    if (flag != 8192)
+                                    {
+                                        DataLog.WriteLine(ErrorCount + " errors are detected");
+                                        for (int i = 0; i < 8192; i++)
+                                        {
+                                            if (storeResult[i, 1] == "Yes")
+                                                DataLog.WriteLine("A Single Error was detected at" + storeWrite[i, 0] + "and was  corrected");
+                                            if (storeResult[i, 2] == "Yes")
+                                                DataLog.WriteLine("A Double Error was detected at" + storeWrite[i, 0] + "and was not corrected");
+                                        }
+                                    }
+                                    else
+                                    {
+                                        DataLog.WriteLine("No Errors were detected in the entire memory location");
+                                        Log_Sheet.AppendText(DateTime.Now + ">>" + "No Errors were detected in the entire memory location" + "\n");
+                                        Log_Sheet.ScrollToCaret();
+                                    }
+                                    
+                                    DataLog.WriteLine(DateTime.Now);
+                                    DataLog.Flush();
+                                    
+                                    Log_Sheet.AppendText(DateTime.Now + ">>" + "Writing to the textfile finished" + "\n");
+                                }
+                            }
+
+
+                            //Log_Sheet.AppendText(storeWrite[address_variable, 0] + "\t" + storeWrite[address_variable, 1].PadLeft(8, '0') + "\t" + storeWrite[address_variable, 2].PadLeft(5, '0') + "\t\t" + storeWrite[address_variable, 3] + "\t\t\t" + storeResult[address_variable, 0] + "\t\t" + storeResult[address_variable, 1] + "\t\t" + storeResult[address_variable, 2] + "\n");//Log_Sheet.Text += storeWrite[b, 0] + "\t" + storeWrite[b, 1].PadLeft(8, '0') + "\t" + storeWrite[b, 2].PadLeft(5, '0') + "\t\t" + storeWrite[b, 3] + "\t\t\t" + storeResult[b, 0] + "\t\t" + storeResult[b, 1] + "\t\t" + storeResult[b, 2]+"\n";
+                            //Log_Sheet.ScrollToCaret();
+
+
+                             /*//Text boxes are accordingly Appended
+                             Current_Address.Text = Convert.ToString(address_variable);
+                             Hammout_Actual_Box.Text = storeRead[address_variable, 1];
+                             Parity_Box.Text = storeRead[address_variable, 2].PadLeft(5,'0');
+                             Parity_Actual_Box.Text = storeRead[address_variable, 3];
+                             Syndrome_Actual_Box.Text = storeWrite[address_variable, 3];
+                             Hammout_Box.Text = storeWrite[address_variable, 1];
+                             Syndrome_Box.Text = storeWrite[address_variable, 2].PadLeft(5,'0');*/
+                             Error_Count.Text = ErrorCount.ToString();
+
+                        }
+
+                    }
+
+                    if(Count%5000==0)
+                         Measure_Values();
+
+                    Application.DoEvents();
+
+                    if (Count == 65536)
+                    {
+                        byte x = DataS[Count];
+                        if (Convert.ToChar(x) == '^')
+                            check_flag = 1;
+                    }
+
+                    Count++;
+                }
+            }
+            catch (Exception error)
+            {
+                MessageBox.Show(error.Message);
+            }
+
+        }
+
+        private void Measure_Values()
+        {
+            try
+            {
+                random_flag = 0;
+                if (!port1.IsOpen)
+                    port1.Open();
+
+                //Thread.Sleep(100);
+                port1.WriteLine("INST OUT1");
+                port1.WriteLine("MEAS:VOLT?");
+                Thread.Sleep(100);
+
+                string temp = port1.ReadExisting();
+                VI_Values[vicount, 0] = temp;
+                //Log_Sheet.AppendText("V1_Edac:" + temp + "V");
+
+                port1.WriteLine("MEAS:CURR?");
+                Thread.Sleep(100);
+                temp = port1.ReadExisting();
+                VI_Values[vicount, 1] = temp;
+                //Log_Sheet.AppendText("I1_Edac" + temp + " A" );
+
+                port1.WriteLine("INST OUT2");                           //Initializing the 2nd channel
+                port1.WriteLine("MEAS:VOLT?");                          //Quering the voltage 
+                Thread.Sleep(100);                                      //Delay for the power supply to query and return the voltage supplied
+
+                temp = port1.ReadExisting();                            //The value in decimal is read from the serial port
+                temp = VI_Values[vicount, 2] = temp;                    //Value stored in a variable for later plotting of graph
+                //Log_Sheet.AppendText("V2_Edac:" + temp + "V");
+
+                port1.WriteLine("MEAS:CURR?");                          //Quering the current value
+                Thread.Sleep(100);
+                temp = port1.ReadExisting();
+                VI_Values[vicount, 3] = temp;
+                //Log_Sheet.AppendText("I2_Edac" + temp + " A" );
+
+                port1.WriteLine("INST OUT3");
+                port1.WriteLine("MEAS:VOLT?");
+                Thread.Sleep(100);
+                temp = port1.ReadExisting();
+                VI_Values[vicount, 4] = temp;
+                //Log_Sheet.AppendText("V_PIC:" + temp + "V" );
+
+                port1.WriteLine("MEAS:CURR?");
+                Thread.Sleep(100);
+                temp = port1.ReadExisting();
+                VI_Values[vicount, 5] = temp;
+                //Log_Sheet.AppendText("I_PIC" + temp + " A" );
+
+                chart1.Series[0].Points.AddXY(vicount, Convert.ToDouble(VI_Values[vicount, 1]));
+                chart1.Series[1].Points.AddXY(vicount, Convert.ToDouble(VI_Values[vicount, 3]));
+                chart1.Series[2].Points.AddXY(vicount, Convert.ToDouble(VI_Values[vicount, 5]));
+
+                
+            }
+            catch
+            {
+                random_flag = 1;
+                Measure_Values();
+                
+            }
+            if (random_flag != 1)
+            {
+                VILog.WriteLine(vicount + "\t" + DateTime.Now + "\t" + VI_Values[vicount, 0] + "V" + "\t" + VI_Values[vicount, 1] + "mA" + "\t" + VI_Values[vicount, 2] + "V" + "\t" + VI_Values[vicount, 3] + "mA" + "\t" + VI_Values[vicount, 4] + "V" + "\t" + VI_Values[vicount, 5] + "mA");
+                VILog.Flush();
+                vicount++;
+            }
+        }
+
+        private void Transmit_Click_1(object sender, EventArgs e)
+        {
+            progressBar1.Value = 0;
+            
+
+            if (!port.IsOpen)                                               //open the port if closed
+                port.Open();
+
+            short StartAddress;                                                     //Data Transmit Sequence $ start address end address data #
+            short EndAddress;
+            string k;
+            k = Start_Address.Text;
+            if (radioButton2.Checked)
+                k = Start_Address_Hex.Text;
+            StartAddress = Convert.ToInt16(k);                                      //break 13 bit address to lsb and msb 
+            byte SData_LSB = Convert.ToByte(StartAddress % 100);
+            byte SData_MSB = Convert.ToByte(StartAddress/ 100);
+
+
+            k = End_Address.Text;
+            if (radioButton2.Checked)
+                k = End_Address_Hex.Text;
+            EndAddress = Convert.ToInt16(k);                         // covert k(from string to 16 bit integer)
+            byte EData_LSB = Convert.ToByte(EndAddress % 100);       //break 13 bit end address to lsb  
+            byte EData_MSB = Convert.ToByte(EndAddress / 100);       //break 13 bit end address to  msb 
+
+
+            k = tb2.Text;           //'8 Bit Data
+            if (radioButton2.Checked)
+                k = textBox2.Text;
+
+            toSend[0] = Convert.ToByte('$');                                //$ and # are used here to indicate the start and end of transmission respectively.           
+            toSend[1] = SData_LSB;                                          //to send : 7 bytes of data to pic in the format: $ start address lsb msb end address lsb msb data #
+            toSend[2] = SData_MSB;
+            toSend[3] = EData_LSB;
+            toSend[4] = EData_MSB;
+            toSend[5] = Convert.ToByte(k);
+            toSend[6] = Convert.ToByte('#');
+
+
+            port.Write(toSend, 0, toSend.Length);                           //Write the 7 bytes of data using the transmit button click                                                            
+            transmit_clicked = 1;
+
+            Log_Sheet.AppendText(DateTime.Now+">> "+Convert.ToString(toSend[5]) + " is written from " + Convert.ToString(StartAddress) + " to " + Convert.ToString(EndAddress)+"\n");
+
+            // Read data from serial communication
+            int j = EndAddress - StartAddress + 1;                                      // Data2= end address; Data1= start address
+            byte[] Data = new byte[4 * j];                                  // recieve 4 bytes of data : address lsb msb data parity
+            Log_Sheet.AppendText("Address" + "\t" + "Data" + "\t\t" + "Parity" + "\t" + "Calculated Parity" + "\n");
+            for (int count = 0; count < 4 * j; count++)
+            {
+                port.Read(Data, count, 1);
+
+                if (count % 4 == 3 && count != 0)            //Data recieved: address lsb address msb hammout syndrome
+                {
+                    int offset_count = count - 3;
+                    int address_variable = (Data[offset_count + 1] * 100) + Data[offset_count]; //the address location is calculated and stored in a 2D array
+
+                    BitArray x = new BitArray(8);                       //BitArray:It represents an array of the binary representation using the values 1 and 0
+                    BitArray p = new BitArray(5);
+
+                    byte[] data = { Data[offset_count + 2] };          //Parity bits calculation using bitwise xor
+                    x = new BitArray(data);                             //BitArray x store the binary representation of the Data value(8 bit)
+                    p[0] = x[0] ^ x[1] ^ x[3] ^ x[4] ^ x[6];            //Parity bits calculated according to the XOR logic of the Hamming Code
+                    p[1] = x[0] ^ x[2] ^ x[3] ^ x[5] ^ x[6];
+                    p[2] = x[1] ^ x[2] ^ x[3] ^ x[7];
+                    p[3] = x[4] ^ x[5] ^ x[6] ^ x[7];
+                    p[4] = x[0] ^ x[1] ^ x[2] ^ x[3] ^ x[4] ^ x[5] ^ x[6] ^ x[7] ^ p[0] ^ p[1] ^ p[2] ^ p[3];
+
+                    int sum_parity = 0;
+                    for (int l = 0; l < p.Count; l++)                    //calculating the int value of the expected parity                                                                                                                        
+                    {
+                        if (p[l])
+                            sum_parity += Convert.ToInt16(Math.Pow(2, l)); //the value is calculated using the 2^i method, for example, 5 is 00101, i.e (0x2^4)+(0x2^3)+(1x2^2)+(0x2^1)+(1x2^0)=5
+                    }
+                    
+                    
+                    Hammout_Actual_Box.Text = Convert.ToString(Data[offset_count + 2],2).PadLeft(8,'0');  //display data in the text box. ,2 convert to binary
+                    Parity_Box.Text = Convert.ToString(Data[offset_count + 3],2).PadLeft(5, '0');
+                    Parity_Actual_Box.Text = Convert.ToString(sum_parity, 2).PadLeft(5, '0');
+                    Current_Address.Text = Convert.ToString((Data[offset_count+1] * 100) + Data[offset_count]); //Concate MSB and LSB to 13 Bit address 
+
+                    storeRead[address_variable, 0] = Convert.ToString((Data[offset_count + 1] * 100) + Data[offset_count]);    //the fiest two bytes have the address so it stored in a 2D array
+                    storeRead[address_variable, 1] = Convert.ToString(Data[offset_count + 2], 2).PadLeft(8, '0');                               //the 3rd byte recieved is the data to be written onto the address location
+                    storeRead[address_variable, 2] = Convert.ToString(Data[offset_count + 3], 2).PadLeft(5, '0');                               //the 4th byte recieved is the parity generated by the EDAC
+                    storeRead[address_variable, 3] = Convert.ToString(sum_parity, 2).PadLeft(5, '0');                            //PadLeft adds zeroes to the left to make it a 5 bit value if its not 
+
+                    Log_Sheet.AppendText(storeRead[address_variable, 0] + "\t" + storeRead[address_variable, 1].PadLeft(8, '0') + "\t" + storeRead[address_variable, 2].PadLeft(5, '0') + "\t" + storeRead[address_variable, 3] + "\n");//Log_Sheet.Text += storeRead[b, 0] +"\t"+ storeRead[b, 1].PadLeft(8,'0') +"\t"+storeRead[b, 2].PadLeft(5,'0') +"\t"+ storeRead[b, 3]+"\n";
+                    Log_Sheet.ScrollToCaret();
+
+                    Application.DoEvents();
+                }
+            }
+
+            progressBar1.Increment(100);
+
+
+
+        }
+
+        private void Recieve_Click(object sender, EventArgs e)
+        {
+            Parity_Box.Text = "";                                           // Clear the TextBox
+            Hammout_Box.Text = "";
+            Syndrome_Box.Text = "";
+            Parity_Actual_Box.Text = "";
+            Syndrome_Actual_Box.Text = "";
+            Hammout_Actual_Box.Text = "";
+            ErrorCount = 0;
+            Error_Count.Text = "";
+            progressBar2.Value = 0;
+            
+
+            if (!port.IsOpen)
+                port.Open();
+
+            short StartAddress;
+            short EndAddress;
+            string k;
+            k = Start_Address_Read.Text;
+            if (radioButton2.Checked)
+                k = Start_Address_Read_Hex.Text;
+            StartAddress = Convert.ToInt16(k);
+
+            byte SData_LSB = Convert.ToByte(StartAddress % 100);                   // break 13 bit address to lsb and msb 
+            byte SData_MSB = Convert.ToByte(StartAddress / 100);
+            
+
+            k = End_Address_Read.Text;
+            if (radioButton2.Checked)
+                k = End_Address_Read_Hex.Text;
+            EndAddress = Convert.ToInt16(k);                 // break 13 bit end address to lsb and msb 
+
+            byte EData_LSB = Convert.ToByte(EndAddress % 100);
+            byte EData_MSB = Convert.ToByte(EndAddress / 100);
+
+            toSend2[0] = Convert.ToByte('@');                               // dynamic address read function in the format @ start address lsb msb end address lsb msb #
+            toSend2[1] = SData_LSB;
+            toSend2[2] = SData_MSB;
+            toSend2[3] = EData_LSB;
+            toSend2[4] = EData_MSB;
+            toSend2[5] = Convert.ToByte('#');
+            
+            port.Write(toSend2, 0, toSend2.Length);                         // Write to the port the address required to read from EDAC
+
+            Log_Sheet.AppendText(DateTime.Now + ">> " + "Data is read from " + Convert.ToString(StartAddress) + " to " + Convert.ToString(EndAddress) + "\n");
+
+            // Read data from serial communication
+            int j = EndAddress - StartAddress + 1;
+            byte[] Data = new byte[4*j];
+            Log_Sheet.AppendText("Address" + "\t\t" + "Hammout" + "\t" + "Syndrome" + "\t" + "Calculated Syndrome" + "\t" + "No Error" + "\t\t" + "Single Error Corrected" + "\t" + "Double Error Detected"+"\n");
+                      
+            for (int count = 0; count < 4 * j; count++)
+            {
+               port.Read(Data, count, 1);
+
+                if (count % 4 == 3 && count !=0)            //Data recieved: address lsb address msb hammout syndrome
+                {
+                    int offset_count = count - 3;
+                    int address_variable = (Data[offset_count + 1] * 100) + Data[offset_count];
+
+                    if ((Data[offset_count + 3] & 32) == 32)      // NER extracted using bitwise'and'operation which is 5th bit in the 4th byte recieved
+                    {
+                        storeResult[address_variable, 0] = "Yes";
+                        NER_Box.BackColor = Color.Green;
+                       
+                    }
+                    else
+                    {
+                        storeResult[address_variable, 0] = "No";
+                        NER_Box.BackColor = Color.Red;              //Textboxes backcolor is appropriately changed
+                        ErrorCount++;
+                    }
+
+                    if ((Data[offset_count + 3] & 64) == 64)       // SERC extracted using bitwise'and'operation which is 6th bit in the 4th byte recieved
+                    {
+                        storeResult[address_variable, 1] = "Yes";
+                        SERC_Box.BackColor = Color.Blue;
+                        
+                    }
+                    else
+                    {
+                        storeResult[address_variable, 1] = "No";
+                        SERC_Box.BackColor = Color.Yellow;
+                    }
+
+                    if ((Data[offset_count + 3] & 128) == 128)     // DERD extracted using bitwise'and'operation which is 7th bit in the 4th byte recieved
+                    {
+                        storeResult[address_variable, 2] = "Yes";
+                        DERD_Box.BackColor = Color.Blue;
+                    }
+                    else
+                    {
+                        storeResult[address_variable, 2] = "No";
+                        DERD_Box.BackColor = Color.Yellow;
+                    }
+
+                    
+                    storeWrite[address_variable, 0] = Convert.ToString((Data[offset_count + 1] * 100) + Data[offset_count]);  //Address
+                    storeWrite[address_variable, 1] = Convert.ToString(Data[offset_count + 2], 2).PadLeft(8, '0');                             //Hammout
+                    storeWrite[address_variable, 2] = Convert.ToString((Data[offset_count + 3] & 31), 2).PadLeft(5, '0');                                            //Syndrome
+                    storeWrite[address_variable, 3] = Convert.ToString("00000");                        //Calculated Syndrome
+
+                    Log_Sheet.AppendText(storeWrite[address_variable, 0] + "\t\t" + storeWrite[address_variable, 1].PadLeft(8, '0') + "\t" + storeWrite[address_variable, 2].PadLeft(5, '0') + "\t\t" + storeWrite[address_variable, 3] + "\t\t\t" + storeResult[address_variable, 0] + "\t\t" + storeResult[address_variable, 1] + "\t\t\t" + storeResult[address_variable, 2] + "\n");
+                    Log_Sheet.ScrollToCaret();
+
+                    if (transmit_clicked == 1)
+                    {
+                        Current_Address.Text = Convert.ToString(address_variable);
+                        Hammout_Actual_Box.Text = storeRead[address_variable, 1];
+                        Parity_Box.Text = storeRead[address_variable, 2].PadLeft(5, '0');
+                        Parity_Actual_Box.Text = storeRead[address_variable, 3];
+                        Syndrome_Actual_Box.Text = storeWrite[address_variable, 3];
+                        Hammout_Box.Text = storeWrite[address_variable, 1];
+                        Syndrome_Box.Text = storeWrite[address_variable, 2].PadLeft(5, '0');
+                        Error_Count.Text = ErrorCount.ToString();
+                    }
+                    else
+                    {
+                        Current_Address.Text = Convert.ToString(address_variable);
+                        Syndrome_Actual_Box.Text = storeWrite[address_variable, 3];
+                        Hammout_Box.Text = storeWrite[address_variable, 1];
+                        Syndrome_Box.Text = storeWrite[address_variable, 2].PadLeft(5, '0');
+                        Error_Count.Text = ErrorCount.ToString();
+                    }
+
+                    progressBar2.Increment(100 / j);
+                    Application.DoEvents();
+                    
+                }
+            }
+            progressBar2.Increment(100);
+            
+
+        }
+
+        private void Power_Off_Click(object sender, EventArgs e)
+        {
+            PowerOff();
+        }
+
+        private void PowerOff()
+        {
+            if (port1.IsOpen)
+            {
+                port1.WriteLine("INST OUT1");
+                Thread.Sleep(100);
+                port1.WriteLine("OUTP OFF");
+                Thread.Sleep(100);
+                port1.WriteLine("INST OUT2");
+                Thread.Sleep(100);
+                port1.WriteLine("OUTP OFF");
+                Thread.Sleep(100);
+                port1.WriteLine("INST OUT3");
+                Thread.Sleep(100);
+                port1.WriteLine("OUTP OFF");
+                Thread.Sleep(100);
+                port1.Close();
+            }
+        }
+
+        private void radioButton1_CheckedChanged(object sender, EventArgs e)
+        {
+            if (radioButton1.Checked)
+            {
+                label28.Text = "      Hex";
+                label10.Text = label28.Text;
+                label21.Text = label28.Text;
+            }
+        }
+
+        private void radioButton2_CheckedChanged(object sender, EventArgs e)
+        {
+            if (radioButton2.Checked)
+            {
+                label28.Text = "   Decimal";
+                label10.Text = label28.Text;
+                label21.Text = label28.Text;
+            }
+        }
+
+        private void End_Address_TextChanged(object sender, EventArgs e)  //Convert the integer value text to hex value in the read only box
+        {
+            if (End_Address.Text != "")
+            {
+                if (radioButton1.Checked)
+                    End_Address_Hex.Text = "0x" + Convert.ToInt16(End_Address.Text).ToString("X");
+                else if (radioButton2.Checked)
+                {
+                    int x = Convert.ToInt16(End_Address.Text, 16);                      //Convert the integer value text to binary value in the read only box
+                    End_Address_Hex.Text = Convert.ToString(x);
+                }
+            }
+        }
+
+        private void Start_Address_TextChanged(object sender, EventArgs e)  //Convert the integer value text to hex value in the read only box.
+        {
+            if (Start_Address.Text != "")
+            {
+                if (radioButton1.Checked)
+                    Start_Address_Hex.Text = "0x" + Convert.ToInt16(Start_Address.Text).ToString("X");
+                else if (radioButton2.Checked)
+                {
+                    int x = Convert.ToInt16(Start_Address.Text, 16);                      //Convert the integer value text to binary value in the read only box
+                    Start_Address_Hex.Text = Convert.ToString(x);
+                }
+            }
+        }
+
+        private void tb2_TextChanged(object sender, EventArgs e)
+        {
+            if (tb2.Text != "")
+            {
+                if (radioButton1.Checked)
+                {
+                    int x = Convert.ToInt16(tb2.Text);                      //Convert the integer value text to binary value in the read only box
+                    Data_Binary_Box.Text = Convert.ToString(x, 2).PadLeft(8, '0');
+                    textBox2.Text = "0x" + Convert.ToInt16(tb2.Text).ToString("X");
+
+                }
+                else if (radioButton2.Checked)
+                {
+                    int x = Convert.ToInt16(tb2.Text, 16);                      //Convert the integer value text to binary value in the read only box
+                    Data_Binary_Box.Text = Convert.ToString(x, 2).PadLeft(8, '0');
+                    textBox2.Text = Convert.ToString(x);
+
+                }
+            }
+
+        }
+
+        private void Start_Address_Read_TextChanged(object sender, EventArgs e)
+        {
+            if (Start_Address_Read.Text != "")
+            {
+                if (radioButton1.Checked)
+                    Start_Address_Read_Hex.Text = "0x" + Convert.ToInt16(Start_Address_Read.Text).ToString("X");
+                else if (radioButton2.Checked)
+                {
+                    int x = Convert.ToInt16(Start_Address_Read.Text, 16);                      //Convert the integer value text to binary value in the read only box
+                    Start_Address_Read_Hex.Text = Convert.ToString(x);
+                }
+            }
+
+        }
+
+        private void End_Address_Read_TextChanged(object sender, EventArgs e)
+        {
+            if (End_Address_Read.Text != "")
+            {
+                if (radioButton1.Checked)
+                    End_Address_Read_Hex.Text = "0x" + Convert.ToInt16(End_Address_Read.Text).ToString("X");
+                else if (radioButton2.Checked)
+                {
+                    int x = Convert.ToInt16(End_Address_Read.Text, 16);                      //Convert the integer value text to binary value in the read only box
+                    End_Address_Read_Hex.Text = Convert.ToString(x);
+                }
+            }
+        }
+
+        private void Hammout_Box_TextChanged(object sender, EventArgs e)
+        {
+            if (Hammout_Box.Text != "")
+            {
+                Hammout_Hex_Box.Text = "0x" + Convert.ToInt16(Hammout_Box.Text, 2).ToString("X");
+            }
+        }
+
+        private void Hammout_Actual_Box_TextChanged(object sender, EventArgs e)
+        {
+            if (Hammout_Actual_Box.Text != "")
+            {
+                Hammout_Actual_Hex_Box.Text = "0x" + Convert.ToInt16(Hammout_Actual_Box.Text, 2).ToString("X");
+            }
+        }
+
+        private void abort_Click(object sender, EventArgs e)
+        {
+            Thread.Sleep(100);
+            abort_flag = 1;
+            port.Write("*");
+            port.Close();
+
+        }
+
+        private void Exit_Click_1(object sender, EventArgs e)               //Exit button to close the interface
+        {
+            this.Close();
+        }
+
+
+     }
+    
+}

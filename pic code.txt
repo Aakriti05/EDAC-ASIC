@@ -1,0 +1,407 @@
+/* 
+ * File:   Main.c
+ * Author: SCL465
+ *
+ * Created on 26 May, 2017, 2:23 PM
+ */
+#include <p18f6527.h>
+#include <xc.h>
+#define _XTAL_FREQ 32000000  //Used in delay
+
+unsigned int n,k,p,abort=0;
+unsigned char flag, rcreg, flag1 = 0;
+unsigned char write_to_EDAC[25],read_the_EDAC[4] = 0;
+
+void UART_init();
+void Port_init();
+void Tx_UART2(unsigned char Data);
+void interrupt_init();
+void read_EDAC(unsigned char *read_the_EDA);
+void write_EDAC (unsigned char *write_to_EDA);
+void code();
+void see_testing();
+
+// #pragma config statements should precede project file includes.
+// Use project enums instead of #define for ON and OFF.
+
+// CONFIG1H
+#pragma config OSC = INTIO7    // Oscillator Selection bits (Internal oscillator block, clock on RA6, port function on RA7)
+#pragma config FCMEN = ON       // Fail-Safe Clock Monitor Enable bit (Fail-Safe Clock Monitor enabled)
+#pragma config IESO = ON        // Internal/External Oscillator Switchover bit (Two-Speed Start-up enabled)
+
+// CONFIG2L
+#pragma config PWRT = ON        // Power-up Timer Enable bit (PWRT enabled)
+#pragma config BOREN = OFF       // Brown-out Reset Enable bits (Brown-out Reset enabled and controlled by software (SBOREN is enabled))
+#pragma config BORV = 0         // Brown-out Voltage bits (Maximum setting)
+
+// CONFIG2H
+#pragma config WDT = OFF        // Watchdog Timer (WDT disabled (control is placed on the SWDTEN bit))
+#pragma config WDTPS = 32768    // Watchdog Timer Postscale Select bits (1:32768)
+
+// CONFIG3L
+
+// CONFIG3H
+#pragma config CCP2MX = PORTC   // CCP2 MUX bit (ECCP2 input/output is multiplexed with RC1)
+#pragma config LPT1OSC = OFF    // Low-Power Timer1 Oscillator Enable bit (Timer1 configured for higher power operation)
+#pragma config MCLRE = OFF       // MCLR Pin Enable bit (MCLR pin disabled; RG5 input pin enabled)
+
+// CONFIG4L
+#pragma config STVREN = OFF     // Stack Full/Underflow Reset Enable bit (Stack full/underflow will not cause Reset)
+#pragma config LVP = ON       // Single-Supply ICSP Enable bit (Single-Supply ICSP disabled)
+#pragma config BBSIZ = BB2K     // Boot Block Size Select bits (1K word (2 Kbytes) Boot Block size)
+#pragma config XINST = OFF      // Extended Instruction Set Enable bit (Instruction set extension and Indexed Addressing mode disabled (Legacy mode))
+
+// CONFIG5L
+#pragma config CP0 = OFF        // Code Protection bit Block 0 (Block 0 (000800, 001000 or 002000-003FFFh) not code-protected)
+#pragma config CP1 = OFF        // Code Protection bit Block 1 (Block 1 (004000-007FFFh) not code-protected)
+#pragma config CP2 = OFF        // Code Protection bit Block 2 (Block 2 (008000-00BFFFh) not code-protected)
+
+// CONFIG5H
+#pragma config CPB = OFF        // Boot Block Code Protection bit (Boot Block (000000-0007FFh) not code-protected)
+#pragma config CPD = OFF        // Data EEPROM Code Protection bit (Data EEPROM not code-protected)
+
+// CONFIG6L
+#pragma config WRT0 = OFF       // Write Protection bit Block 0 (Block 0 (000800, 001000 or 002000-003FFFh) not write-protected)
+#pragma config WRT1 = OFF       // Write Protection bit Block 1 (Block 1 (004000-007FFFh) not write-protected)
+#pragma config WRT2 = OFF       // Write Protection bit Block 2 (Block 2 (008000-00BFFFh) not write-protected)
+
+// CONFIG6H
+#pragma config WRTC = OFF       // Configuration Register Write Protection bit (Configuration registers (300000-3000FFh) not write-protected)
+#pragma config WRTB = OFF       // Boot Block Write Protection bit (Boot Block (000000-007FFF, 000FFF or 001FFFh) not write-protected)
+#pragma config WRTD = OFF       // Data EEPROM Write Protection bit (Data EEPROM not write-protected)
+
+// CONFIG7L
+#pragma config EBTR0 = OFF      // Table Read Protection bit Block 0 (Block 0 (000800, 001000 or 002000-003FFFh) not protected from table reads executed in other blocks)
+#pragma config EBTR1 = OFF      // Table Read Protection bit Block 1 (Block 1 (004000-007FFFh) not protected from table reads executed in other blocks)
+#pragma config EBTR2 = OFF      // Table Read Protection bit Block 2 (Block 2 (008000-00BFFFh) not protected from table reads executed in other blocks)
+
+// CONFIG7H
+#pragma config EBTRB = OFF      // Boot Block Table Read Protection bit (Boot Block (000000-007FFF, 000FFF or 001FFFh) not protected from table reads executed in other blocks)
+
+void interrupt high_priority high_isr()
+{    
+    code();     
+}
+
+void main()
+{
+   OSCCON = 0x70;           // Intialised internal clock to 8MHz. 0x70
+   OSCTUNEbits.PLLEN = 1;   // PLL enabled making internal clock freq 8*4MHz i.e. 32MHz
+   Port_init();             //port initialise
+   UART_init();             //Serial port initialise
+   interrupt_init();        //interrupts initialise
+
+   PORTAbits.RA0 = 0;   //rst low for 100ms
+   __delay_ms(3);      //delay of 10ms
+   PORTAbits.RA1 = 0;   //csn low
+   PORTAbits.RA0 = 1;   //rst high
+   PORTAbits.RA2 = 1;   //wn high
+   PORTAbits.RA3 = 1;   //oen high
+   while(1)
+   {
+       switch(flag1)
+       {
+           case '0':   //SEE TESTing for Pattern 0x00
+           {               
+               unsigned char write_00[] = {0x00,0x00,0x5B,0x51,0x00} ;
+               write_EDAC(write_00);
+               unsigned char read_00[] = {0x00,0x00,0x5B,0x51};
+               read_EDAC(read_00);
+               flag1 = 0;
+               abort = 0;
+               TXREG2 = '^';
+               while(TXSTA2bits.TRMT!=1);
+               break;
+           }
+           case '1':  //SEE TESTing for Pattern 0xFF
+           {
+               unsigned char write_FF[] = {0x00,0x00,0x5B,0x51,0xFF};
+               write_EDAC(write_FF);
+               unsigned char read_FF[] = {0x00,0x00,0x5B,0x51};
+               read_EDAC(read_FF);
+               flag1 = 0;
+               abort = 0;
+               TXREG2 = '^';
+               while(TXSTA2bits.TRMT!=1);
+               break;
+           }
+           case '2':  //SEE TESTing for Pattern 0x55
+           {
+               unsigned char write_55[] = {0x00,0x00,0x5B,0x51,0x55};
+               write_EDAC(write_55);
+               unsigned char read_55[] = {0x00,0x00,0x5B,0x51};
+               read_EDAC(read_55);
+               flag1 = 0;
+               abort = 0;
+               TXREG2 = '^';
+               while(TXSTA2bits.TRMT!=1);
+               break;
+           }
+           case '3':  //SEE TESTing for Pattern 0xAA
+           {
+               unsigned char write_AA[] = {0x00,0x00,0x5B,0x51,0xAA};
+               write_EDAC(write_AA);
+               unsigned char read_AA[] = {0x00,0x00,0x5B,0x51};
+               read_EDAC(read_AA);
+               flag1 = 0;
+               abort = 0;
+               TXREG2 = '^';
+               while(TXSTA2bits.TRMT!=1);
+               break;
+           }
+           case '4':  //SEE TESTing for Pattern 0xAA at even add & 0x55 at odd add
+           {
+               p = 4;
+               unsigned char write_AA[] = {0x00,0x00,0x5B,0x51,0xAA};
+               write_EDAC(write_AA);
+               unsigned char read_odd_even[] = {0x00,0x00,0x5B,0x51};
+               read_EDAC(read_odd_even);
+               p = 0;
+               flag1 = 0;
+               abort = 0;
+               TXREG2 = '^';
+               while(TXSTA2bits.TRMT!=1);
+               break;
+           }
+           case '5':  //SEE TESTing for Pattern 0x55 at even add & 0xAA at odd add
+           {
+               p = 5;
+               unsigned char write_AA[] = {0x00,0x00,0x5B,0x51,0xAA};
+               write_EDAC(write_AA);
+               unsigned char read_even_odd[] = {0x00,0x00,0x5B,0x51};
+               read_EDAC(read_even_odd);
+               p = 0;
+               flag1 = 0;
+               abort = 0;
+               TXREG2 = '^';
+               while(TXSTA2bits.TRMT!=1);
+               break;
+           }
+           case '6':  //SEE TESTing for Pattern as Current address LSB
+           {
+               p = 6;
+               unsigned char write_AA[] = {0x00,0x00,0x5B,0x51,0xAA};
+               write_EDAC(write_AA);
+               unsigned char read_Add[] = {0x00,0x00,0x5B,0x51};
+               read_EDAC(read_Add);
+               p = 0;
+               flag1 = 0;
+               abort = 0;
+               TXREG2 = '^';
+               while(TXSTA2bits.TRMT!=1);
+               break;
+           }
+           default:
+               break;
+       }
+   }
+}
+
+void code()
+{
+    rcreg = RCREG2;            //reading receive register into a variable    
+    switch(flag)
+    {
+        case 0:                //flag=0 if no task is going on
+            switch(rcreg)
+            {
+                case '$':      //writing data to EDAC in the format-$start address LSB, MSB , End address LSB, MSB, data#
+                    flag = 1;
+                    n = 0;
+                    break;
+                case '@':      //reading data from EDAC sending value in format @start address LSB, MSB , End address LSB, MSB#
+                    flag = 2;
+                    n = 0;                    
+                    break;
+                case '%':     //SEE Testing
+                    flag = 3;                    
+                    break;
+                default:
+                    break;
+            }
+            break;
+        case 1:               //storing start address LSB, MSB , End address LSB, MSB, data
+            if(rcreg == '#')
+            {
+                flag = 0;
+                write_EDAC(write_to_EDAC);
+            }
+            write_to_EDAC[n] = rcreg;
+            n++;            
+            break;
+        case 2:              //storing start address LSB, MSB , End address LSB, MSB
+            if(rcreg == '#')
+            {
+                flag = 0;
+                read_EDAC(read_the_EDAC);
+            }
+            read_the_EDAC[n] = rcreg;
+            n++; 
+            break;
+        case 3:             //SEE TESTing for different patterns
+            if (rcreg == '#')//end of SEE Testing
+                flag = 0;
+            else if (rcreg == '*')
+            {
+                flag = 0;
+                abort = 1;     //for telling the loops that abort button is pressed
+            }
+            flag1 = rcreg; //flag1 tells the pattern of SEE Testing
+        default:
+            break;
+    }
+}
+
+void read_EDAC(unsigned char *read_the_EDA)
+{
+    unsigned int read_start_add = read_the_EDA[1]*(0x64) + read_the_EDA[0];     //reading start address
+    unsigned int read_end_add   = read_the_EDA[3]*(0x64) + read_the_EDA[2];     //reading end address
+    PORTAbits.RA2 = 1;                                                          //wn high
+    
+    for (k = read_start_add ; k <= read_end_add ; k++)       //reading EDAC output for the given addresses
+    {
+        
+        PORTE = 0x00FF & k;              //current_add_LSB;
+        PORTF = (k>>8) & 0x001F;         //current_add_MSB;
+        
+        PORTAbits.RA3 = 0;               //oen high
+
+        TXREG2 = (k%(0x0A))+((k/(0x0A))%(0x0A))*(0x0A);    //sending address LSB
+        unsigned char hamout = PORTD;
+        while(TXSTA2bits.TRMT!=1);
+        
+        TXREG2 = ((k/(0x0A)/(0x0A))%(0x0A))+((k/(0x0A)/(0x0A)/0x0A)%(0x0A))*(0x0A);     //sending address LSB
+        unsigned char syndrome = PORTGbits.RG4<<7 | PORTGbits.RG3<<6 | PORTGbits.RG0<<5 | PORTFbits.RF7<<4 | PORTFbits.RF6<<3 | PORTFbits.RF5<<2 | PORTAbits.RA5<<1 | PORTAbits.RA4 ;
+        while(TXSTA2bits.TRMT!=1);
+        
+        TXREG2 = hamout;                 //sending hammout
+        if (abort == 1)                  //breaking loop as abort button is pressed
+            break;
+        while(TXSTA2bits.TRMT!=1);
+        
+        TXREG2 = syndrome;               //sending syndrome
+        while(TXSTA2bits.TRMT!=1);
+
+        PORTAbits.RA3 = 1;               //oen high
+    }    
+}
+
+void write_EDAC (unsigned char *write_to_EDA)
+{
+    unsigned int write_start_add = write_to_EDA[1]*(0x64) + write_to_EDA[0];    //reading start address
+    unsigned int write_end_add   = write_to_EDA[3]*(0x64) + write_to_EDA[2];    //reading end address
+    PORTAbits.RA3 = 1;                //oen high
+    
+    for (k = write_start_add ; k <= write_end_add ; k++)        //giving EDAC data for the given addresses
+    {
+        PORTE = 0x00FF & k;            //current_add_LSB;
+        PORTF = (k>>8) & 0x001F;       //current_add_MSB;
+
+        PORTAbits.RA2 = 0;                //wn low        
+        PORTAbits.RA2 = 1;                //wn high
+
+        TXREG2 = (k%(0x0A))+(((k/(0x0A))%(0x0A))*(0x0A));   //sending address LSB
+        unsigned char current_data = 0x00;
+        while(TXSTA2bits.TRMT!=1);
+
+        TXREG2 = ((k/((0x0A)*(0x0A)))%(0x0A))+(((k/((0x0A)*(0x0A)*(0x0A)))%(0x0A))*(0x0A));   //sending address MSB
+        if (p==0)
+            current_data =  write_to_EDA[4];             //putting data onto EDAC
+        else if (p==4)
+        {
+            if((k % 0x02) == 0)
+                current_data = 0xAA;                     //putting data onto even add of EDAC
+            else
+                current_data = 0x55;                     //putting data onto odd add of EDAC
+        }
+        else if (p==5)
+        {
+            if ((k % 0x02) == 0)
+                current_data = 0x55;                     //putting data onto even add of EDAC
+            else
+                current_data = 0xAA;                     //putting data onto odd add of EDAC
+        }
+        else if (p==6)
+        {
+            current_data = 0x00FF & k;                   //putting data as current address LSB
+        }
+        PORTC = current_data;
+        while(TXSTA2bits.TRMT!=1);
+        
+        TXREG2 = current_data;                           //sending data
+        unsigned char parity = PORTB & 0x1F;
+        while(TXSTA2bits.TRMT!=1);
+
+        TXREG2 = parity;                                 //sending parity
+        if (abort == 1)                                  //breaking loop as abort button is pressed
+            break;
+        while(TXSTA2bits.TRMT!=1);
+    }
+}
+
+void UART_init()
+{
+    TRISGbits.TRISG2=1; //RX2-receive data on pic
+    TRISGbits.TRISG1=0; //TX2-transmit data on pic
+
+    TXSTA2   = 0x20;    // 8-bit transmit enabled, asynchronous, BRGH = 0(low baud rate), SYNC =0
+    RCSTA2   = 0x90;    // Serial Enable, 8Bit Transmission, Asynchronous, Enable Reciever
+    BAUDCON2 = 0x08;    //BRG16=1,
+    SPBRGH2  = 0x00;    //Baud Rate = 32MHz/16*(n+1) n=SPBRGH2_SPBRG2
+    SPBRG2   = 0x10;    // BaudRate=115200 TXSTA2 = 0x20; for focs=32MHz
+}
+
+void Port_init()
+{
+    ADCON1=0x0F;            //making portA pins as digital
+
+    PORTA=0;                //clearing the latches
+    LATA=0;
+    PORTB=0;
+    LATB=0;
+    PORTC=0;
+    LATC=0;
+    PORTD=0;
+    LATD=0;
+    PORTE=0;
+    LATE=0;
+    PORTF=0;
+    LATF=0;
+    PORTG=0;
+    LATG=0;
+   
+    TRISAbits.TRISA0 = 0;   //ouput as rst bit
+    TRISAbits.TRISA1 = 0;   //ouput as csn bit
+    TRISAbits.TRISA2 = 0;   //ouput as wn bit
+    TRISAbits.TRISA3 = 0;   //ouput as oen bit
+    TRISC = 0x00;           //output as data bits
+    TRISE = 0x00;           //output as address 0-7 bits
+    TRISFbits.TRISF0 = 0;   //output as address 8th bit
+    TRISFbits.TRISF1 = 0;   //output as address 9th bit
+    TRISFbits.TRISF2 = 0;   //output as address 10th bit
+    TRISFbits.TRISF3 = 0;   //output as address 11th bit
+    TRISFbits.TRISF4 = 0;   //output as address 12th bit
+    TRISBbits.TRISB0 = 1;   //input as parity0 bit
+    TRISBbits.TRISB1 = 1;   //input as parity1 bit
+    TRISBbits.TRISB2 = 1;   //input as parity2 bit
+    TRISBbits.TRISB3 = 1;   //input as parity3 bit
+    TRISBbits.TRISB4 = 1;   //input as parity4 bit
+    TRISBbits.TRISB7 = 0;   //PGD
+    TRISD = 0xFF;            //input as HAMOUT bits
+    TRISAbits.TRISA4 = 1;   //input as syndrome0 bit
+    TRISAbits.TRISA5 = 1;   //input as syndrome1 bit
+    TRISFbits.TRISF5 = 1;   //input as syndrome2 bit
+    TRISFbits.TRISF6 = 1;   //input as syndrome3 bit
+    TRISFbits.TRISF7 = 1;   //input as syndrome4 bit
+    TRISGbits.TRISG0 = 1;   //input as ner bit
+    TRISGbits.TRISG3 = 1;   //input as serc bit
+    TRISGbits.TRISG4 = 1;   //input as derd bit
+}
+
+void interrupt_init()
+{
+    RCONbits.IPEN   = 1;   //priority levels enabled in interrupts
+    IPR3bits.RC2IP  = 1;   //receive interrupt set as high priority
+    PIE3bits.RC2IE  = 1;   //receive interrupt enabled
+    INTCONbits.GIEH = 1;   //global interrupts enabled 
+}
